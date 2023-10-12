@@ -3,4 +3,6 @@ config:
   aws:region: us-east-1
   aws:accessKey: AKIAS3IZXJMO3LCYCFG2
   aws:secretKey: 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
+  vpc_cidr_block: "172.16.0.0/16"
+
 
