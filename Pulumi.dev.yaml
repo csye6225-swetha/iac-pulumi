@@ -1,2 +1,5 @@
 config:
+  aws:profile: dev
   aws:region: us-east-1
+  aws:accessKey: AKIA6DJTIL5XKS3AFZRH
+  aws:secretKey: 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

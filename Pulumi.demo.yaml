@@ -1,0 +1,6 @@
+config:
+  aws:profile: demo
+  aws:region: us-east-1
+  aws:accessKey: AKIAS3IZXJMO3LCYCFG2
+  aws:secretKey: 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
+
