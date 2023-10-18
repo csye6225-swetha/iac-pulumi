@@ -4,4 +4,6 @@ config:
   aws:accessKey: AKIA6DJTIL5XKS3AFZRH
   aws:secretKey: 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
   vpc_cidr_block: "172.16.0.0/16"
+  ami_id: "ami-016763a45d7cf9426"
+  key_name: "ec2-connect"
     
