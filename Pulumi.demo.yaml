@@ -4,5 +4,7 @@ config:
   aws:accessKey: AKIAS3IZXJMO3LCYCFG2
   aws:secretKey: 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
   vpc_cidr_block: "172.16.0.0/16"
+  ami_id: "ami-016763a45d7cf9426"
+  key_name: "demo-connect"
 
 
