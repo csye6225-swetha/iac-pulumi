@@ -31,8 +31,11 @@ private_route_table = ec2.RouteTable("private_route_table",
     vpc_id=vpc.id)
 
 public_subnet_ids = []
+private_subnet_ids = []
 
 availability_zones = aws.get_availability_zones(state="available")
+az_count = len(availability_zones.names)
+
 
 for i, zone in enumerate(availability_zones.names[:3]):
 
@@ -40,11 +43,13 @@ for i, zone in enumerate(availability_zones.names[:3]):
     public_subnet_cidr = f"{vpc_cidr_block.split('.')[0]}.{vpc_cidr_block.split('.')[1]}.{i}.0/24"
     private_subnet_cidr = f"{vpc_cidr_block.split('.')[0]}.{vpc_cidr_block.split('.')[1]}.{i+3}.0/24"
 
+    az_name = availability_zones.names[i]  # Cyclic assignment of AZs
 
     subnet = ec2.Subnet(f"public_subnet_{i}",
         cidr_block= public_subnet_cidr,
         vpc_id=vpc.id,
         map_public_ip_on_launch=True,
+        availability_zone=az_name, 
         tags={"Name": f"public-subnet-{i}"})
     
     public_subnet_ids.append(subnet.id)
@@ -58,7 +63,10 @@ for i, zone in enumerate(availability_zones.names[:3]):
         cidr_block=private_subnet_cidr,
         vpc_id=vpc.id,
         map_public_ip_on_launch=False,
+        availability_zone=az_name, 
         tags={"Name": f"private-subnet-{i}"})
+    
+    private_subnet_ids.append(subnet.id)
 
    
     ec2.RouteTableAssociation(f"private_rta_{i}",
@@ -99,17 +107,95 @@ application_security_group = ec2.SecurityGroup("applicationSecurityGroup",
             cidr_blocks=["0.0.0.0/0"],
         ),
     ],
+
+    egress=[  
+        aws.ec2.SecurityGroupEgressArgs(
+            from_port=0,
+            to_port=0,
+            protocol="-1",  
+            cidr_blocks=["0.0.0.0/0"],
+        ),
+    ],
+
+)
+
+rds_security_group = ec2.SecurityGroup("rdsSecurityGroup",
+    description="Security group for rds instances",
+    vpc_id=vpc.id,
+    ingress=[
+        aws.ec2.SecurityGroupIngressArgs(
+            from_port=3306,  
+            to_port=3306,   
+            protocol="tcp",
+            cidr_blocks=["0.0.0.0/0"],
+        ),
+    
+    ],
+    egress=[  
+        aws.ec2.SecurityGroupEgressArgs(
+            from_port=0,
+            to_port=0,
+            protocol="-1",  
+            cidr_blocks=["0.0.0.0/0"],
+        ),
+    ],
+
 )
 
 
 key_pair_name = pulumi.Config().require("key_name")
 
-
 ami_id = pulumi.Config().require("ami_id")
 
+rds_username = pulumi.Config().require("db_username")
+rds_password = pulumi.Config().require("db_password")
 
 subnet_id_first = public_subnet_ids[0]
 
+rds_subnet_group = aws.rds.SubnetGroup(
+    "my-rds-subnet-group",
+    subnet_ids=private_subnet_ids,
+)
+
+rds_parameter_group = aws.rds.ParameterGroup(
+    "customparametergroup",
+    family="mariadb10.6",
+)
+
+rds_instance = aws.rds.Instance(
+    "my-rds-instance",
+    allocated_storage=20,
+    storage_type="gp2",
+    engine="mariadb",
+    instance_class="db.t3.micro",  
+    multi_az=False,
+    name="csye6225",
+    username=rds_username,
+    password=rds_password,  
+    publicly_accessible=False,
+    db_subnet_group_name=rds_subnet_group,
+    vpc_security_group_ids=[rds_security_group.id],
+    parameter_group_name=rds_parameter_group.name,
+    skip_final_snapshot=True,
+)
+
+rds_endpoint = rds_instance.endpoint.apply(lambda endpoint: endpoint)
+
+
+
+user_data_script = pulumi.Output.all(rds_username, rds_password, rds_endpoint).apply(
+    lambda vars: f"""#!/bin/bash
+export SPRING_DATASOURCE_USERNAME="{vars[0]}"
+export SPRING_DATASOURCE_PASSWORD="{vars[1]}"
+export SPRING_DATASOURCE_URL="jdbc:mysql://{vars[2]}/webapp_DB?createDatabaseIfNotExist=true"
+
+# Change the working directory to where your JAR file is located
+cd /home/admin
+
+# Start your Spring Boot application
+java -jar webapp-0.0.1-SNAPSHOT.jar --spring.config.name=application
+"""
+)
 
 ec2_instance = ec2.Instance("myEC2Instance",
     ami=ami_id,
@@ -121,6 +207,7 @@ ec2_instance = ec2.Instance("myEC2Instance",
         "volume_type": "gp2",  
         "delete_on_termination": True,  
     },
+    user_data=user_data_script,
     key_name=key_pair_name,
     tags={
         "Name": "MyEC2Instance",
@@ -130,4 +217,5 @@ ec2_instance = ec2.Instance("myEC2Instance",
 pulumi.export("ec2InstanceId", ec2_instance.id)
 pulumi.export("vpcId", vpc.id)
 pulumi.export("gatewayId", gateway.id)
+pulumi.export("dbEndPoint", rds_instance.endpoint)
 
