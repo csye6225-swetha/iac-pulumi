@@ -186,16 +186,16 @@ rds_endpoint = rds_instance.endpoint.apply(lambda endpoint: endpoint)
 user_data_script = pulumi.Output.all(rds_username, rds_password, rds_endpoint).apply(
     lambda vars: f"""#!/bin/bash
 cat <<EOF > /home/admin/application.properties
+spring.datasource.driver-class-name=com.mysql.cj.jdbc.Driver
+
+
+spring.jpa.hibernate.ddl-auto=create
+spring.jpa.show-sql=true
 spring.datasource.username={vars[0]}
 spring.datasource.password={vars[1]}
 spring.datasource.url=jdbc:mysql://{vars[2]}/webapp_DB?createDatabaseIfNotExist=true
 EOF
 
-# Change the working directory to where your JAR file is located
-cd /home/admin
-
-# Start your Spring Boot application
-java -jar webapp-0.0.1-SNAPSHOT.jar --spring.config.name=application
 """
 )
 
