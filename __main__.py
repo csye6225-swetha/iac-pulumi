@@ -1,6 +1,6 @@
 import pulumi
 import pulumi_aws as aws
-from pulumi_aws import ec2
+from pulumi_aws import route53, ec2
 
 
 config = pulumi.Config()
@@ -127,7 +127,7 @@ rds_security_group = ec2.SecurityGroup("rdsSecurityGroup",
             from_port=3306,  
             to_port=3306,   
             protocol="tcp",
-            cidr_blocks=["0.0.0.0/0"],
+            security_groups=[application_security_group.id],
         ),
     
     ],
@@ -189,15 +189,59 @@ cat <<EOF > /home/admin/application.properties
 spring.datasource.driver-class-name=com.mysql.cj.jdbc.Driver
 
 
-spring.jpa.hibernate.ddl-auto=create
+spring.jpa.hibernate.ddl-auto=update
 spring.jpa.show-sql=true
 spring.datasource.username={vars[0]}
 spring.datasource.password={vars[1]}
 spring.datasource.url=jdbc:mysql://{vars[2]}/webapp_DB?createDatabaseIfNotExist=true
+
+logging.level.org.springframework.web=debug
+logging.file.path=./
+logging.file.name=log.txt
+
+management.statsd.metrics.export.enabled=true
+management.statsd.metrics.export.host=localhost
+management.statsd.metrics.export.port=8125
+
 EOF
+
+sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
+    -a fetch-config \
+    -m ec2 \
+    -c file:/home/admin/cloudwatch-config.json \
+    -s
+
+sudo systemctl restart webapp
 
 """
 )
+
+
+
+role = aws.iam.Role("cloudwatch-agent",
+    assume_role_policy="""{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Principal": {
+                "Service": "ec2.amazonaws.com"
+            },
+            "Action": "sts:AssumeRole"
+        }
+    ]
+}""",
+)
+
+# Attach the CloudWatchAgentServerPolicy to the IAM role
+policy_attachment = aws.iam.RolePolicyAttachment("my-policy-attachment",
+    policy_arn="arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy",
+    role=role.name,
+)
+
+hosted_zone_id = config.require("hosted_zoneid")
+domain_name = config.require("hosted_zonename")
+
 
 ec2_instance = ec2.Instance("myEC2Instance",
     ami=ami_id,
@@ -209,6 +253,7 @@ ec2_instance = ec2.Instance("myEC2Instance",
         "volume_type": "gp2",  
         "delete_on_termination": True,  
     },
+    #iam_instance_profile=role.name,
     user_data=user_data_script,
     key_name=key_pair_name,
     tags={
@@ -216,8 +261,16 @@ ec2_instance = ec2.Instance("myEC2Instance",
     })
 
 
+record = aws.route53.Record("myARecord",
+    name=domain_name,
+    type="A",
+    ttl=300,
+    records=[ec2_instance.public_ip],
+    zone_id=hosted_zone_id)
+
 pulumi.export("ec2InstanceId", ec2_instance.id)
 pulumi.export("vpcId", vpc.id)
 pulumi.export("gatewayId", gateway.id)
 pulumi.export("dbEndPoint", rds_instance.endpoint)
+
 
