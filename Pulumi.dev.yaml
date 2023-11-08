@@ -2,7 +2,9 @@ config:
   aws:profile: dev
   aws:region: us-east-1
   vpc_cidr_block: "10.0.0.0/16"
-  ami_id: "ami-0e4ed45b3feff90d8"
+  ami_id: "ami-0242f05d734adfb39"
+  aws:accessKey: AKIA6DJTIL5XKS3AFZRH
+  aws:secretKey: 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
   key_name: "ec2-connect"
   db_username: "csye6225"
   db_password: "dbPass23"
