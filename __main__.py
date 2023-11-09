@@ -239,7 +239,10 @@ policy_attachment = aws.iam.RolePolicyAttachment("my-policy-attachment",
     role=role.name,
 )
 
+
+
 instance_profile = aws.iam.InstanceProfile("instance_profile", role=role.name)
+
 
 hosted_zone_id = config.require("hosted_zoneid")
 domain_name = config.require("hosted_zonename")
@@ -255,7 +258,6 @@ ec2_instance = ec2.Instance("myEC2Instance",
         "volume_type": "gp2",  
         "delete_on_termination": True,  
     },
-
     user_data=user_data_script,
     key_name=key_pair_name,
     tags={
