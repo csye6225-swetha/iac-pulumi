@@ -1,7 +1,7 @@
 import pulumi
 import pulumi_aws as aws
 from pulumi_aws import route53, ec2
-
+import base64
 
 config = pulumi.Config()
 
@@ -36,6 +36,7 @@ private_subnet_ids = []
 availability_zones = aws.get_availability_zones(state="available")
 az_count = len(availability_zones.names)
 
+first_available_zone = availability_zones.names[0] 
 
 for i, zone in enumerate(availability_zones.names[:3]):
 
@@ -73,6 +74,34 @@ for i, zone in enumerate(availability_zones.names[:3]):
         subnet_id=subnet.id,
         route_table_id=private_route_table.id)
     
+load_balancer_security_group = aws.ec2.SecurityGroup(
+    "loadBalancerSecurityGroup",
+    description="Load Balancer Security Group",
+    vpc_id=vpc.id,  # Replace with your VPC ID
+    ingress=[
+        aws.ec2.SecurityGroupIngressArgs(
+            protocol="tcp",
+            from_port=80,
+            to_port=80,
+            cidr_blocks=["0.0.0.0/0"],  # Allowing traffic from anywhere (0.0.0.0/0)
+        ),
+        aws.ec2.SecurityGroupIngressArgs(
+            protocol="tcp",
+            from_port=443,
+            to_port=443,
+            cidr_blocks=["0.0.0.0/0"],  # Allowing traffic from anywhere (0.0.0.0/0)
+        ),
+    ],
+
+    egress=[  
+        aws.ec2.SecurityGroupEgressArgs(
+            from_port=0,
+            to_port=0,
+            protocol="-1",  
+            cidr_blocks=["0.0.0.0/0"],
+        ),
+    ],
+)
 
 application_security_group = ec2.SecurityGroup("applicationSecurityGroup",
     description="Security group for web application EC2 instances",
@@ -83,28 +112,14 @@ application_security_group = ec2.SecurityGroup("applicationSecurityGroup",
             from_port=22,
             to_port=22,
             protocol="tcp",
-            cidr_blocks=["0.0.0.0/0"],
-        ),
-      
-        ec2.SecurityGroupIngressArgs(
-            from_port=80,
-            to_port=80,
-            protocol="tcp",
-            cidr_blocks=["0.0.0.0/0"],
-        ),
-       
-        ec2.SecurityGroupIngressArgs(
-            from_port=443,
-            to_port=443,
-            protocol="tcp",
-            cidr_blocks=["0.0.0.0/0"],
+            security_groups=[load_balancer_security_group.id],
         ),
        
         ec2.SecurityGroupIngressArgs(
             from_port=8080,
             to_port=8080,
             protocol="tcp",
-            cidr_blocks=["0.0.0.0/0"],
+            security_groups=[load_balancer_security_group.id],
         ),
     ],
 
@@ -239,7 +254,10 @@ policy_attachment = aws.iam.RolePolicyAttachment("my-policy-attachment",
     role=role.name,
 )
 
+
+
 instance_profile = aws.iam.InstanceProfile("instance_profile", role=role.name)
+
 
 hosted_zone_id = config.require("hosted_zoneid")
 domain_name = config.require("hosted_zonename")
@@ -255,7 +273,6 @@ ec2_instance = ec2.Instance("myEC2Instance",
         "volume_type": "gp2",  
         "delete_on_termination": True,  
     },
-
     user_data=user_data_script,
     key_name=key_pair_name,
     tags={
@@ -264,17 +281,183 @@ ec2_instance = ec2.Instance("myEC2Instance",
     iam_instance_profile=instance_profile.name,
     )
 
+encoded_user_data =  pulumi.Output.from_input(user_data_script).apply(lambda s: base64.b64encode(s.encode()).decode('utf-8'))
 
-record = aws.route53.Record("myARecord",
+launch_template = aws.ec2.LaunchTemplate("launch_template",
+    
+        iam_instance_profile=aws.ec2.LaunchTemplateIamInstanceProfileArgs(
+        name=instance_profile.name,
+    ),
+
+      block_device_mappings=[
+        {
+            "deviceName": "/dev/xvda",  
+            "ebs": {
+                "volumeSize": 25,  
+                "volumeType": "gp2",  
+                "deleteOnTermination": True,  
+            },
+        },
+    ],
+
+    image_id=ami_id,
+    instance_initiated_shutdown_behavior="terminate",
+   
+    instance_type="t2.micro",
+    key_name=key_pair_name,
+
+    monitoring=aws.ec2.LaunchTemplateMonitoringArgs(
+        enabled=True,
+    ),
+    network_interfaces=[aws.ec2.LaunchTemplateNetworkInterfaceArgs(
+        associate_public_ip_address="true",
+        security_groups=[application_security_group.id],
+        
+    )],
+    placement=aws.ec2.LaunchTemplatePlacementArgs(
+        availability_zone=first_available_zone,
+    ),
+    tag_specifications=[aws.ec2.LaunchTemplateTagSpecificationArgs(
+        resource_type="instance",
+        tags={
+            "Name": "instancesCSYE6225F23",
+        },
+    )],
+    user_data=encoded_user_data,
+    )
+
+asg_parameters = {
+    "cooldown": 60,
+    "launchTemplate": {
+        "id": launch_template.id,
+        "version": launch_template.latest_version,
+    },
+    "minSize": 1,
+    "maxSize": 3,
+    "desiredCapacity": 1,
+}
+
+
+targetGroup = aws.lb.TargetGroup(
+    "targetGroup",
+    port=8080,  
+    protocol="HTTP",  
+    vpc_id=vpc.id,
+    target_type="instance",  
+    slow_start=60,  
+    health_check= {
+       "enabled": True,
+       "unhealthy_threshold": 5,
+       "healthy_threshold": 2,
+       "timeout": 3,
+       "interval": 30,
+       "protocol": "HTTP",
+       "path": "/healthz",
+    },
+)
+
+applicationLoadBalancer = aws.lb.LoadBalancer(
+    "Assignment8LoadBalancer",
+    subnets=public_subnet_ids, 
+    load_balancer_type="application", 
+    security_groups=[load_balancer_security_group.id],  
+    
+)
+
+httpListener = aws.lb.Listener(
+    "http-listener",
+    load_balancer_arn= applicationLoadBalancer.arn,
+    port=80, 
+    protocol="HTTP", 
+    default_actions=[  
+        {
+            "type": "forward",  # Forward the request to a target group
+            "target_group_arn": targetGroup.arn,  # ARN of the target group to forward traffic to
+        }
+    ]
+)
+
+
+
+auto_scaling_group = aws.autoscaling.Group(
+    "my-auto-scaling-group",
+    vpc_zone_identifiers=public_subnet_ids,
+    launch_template=asg_parameters["launchTemplate"],
+    min_size=asg_parameters["minSize"],
+    max_size=asg_parameters["maxSize"],
+    desired_capacity=asg_parameters["desiredCapacity"],
+    default_cooldown=asg_parameters["cooldown"],
+    health_check_type="EC2",
+    target_group_arns=[targetGroup.arn],
+    health_check_grace_period=300, 
+)
+
+scale_up_policy = aws.autoscaling.Policy(
+    "scaleup",
+    adjustment_type="ChangeInCapacity",
+    autoscaling_group_name=auto_scaling_group.name,
+    cooldown=60,
+    scaling_adjustment=1,
+)
+
+# Create a scaling down policy
+scale_down_policy = aws.autoscaling.Policy(
+    "scaledown",
+    adjustment_type="ChangeInCapacity",
+    autoscaling_group_name=auto_scaling_group.name,
+    cooldown=30,
+    scaling_adjustment=-1,
+)
+
+# Create a CPU utilization high alarm
+cpu_utilization_high_alarm = aws.cloudwatch.MetricAlarm(
+    "cpuHigh",
+    alarm_actions=[scale_up_policy.arn],
+    comparison_operator="GreaterThanThreshold",
+    evaluation_periods=2,
+    metric_name="CPUUtilization",
+    namespace="AWS/EC2",
+    period=60,
+    statistic="Average",
+    threshold=5,
+    alarm_description="This metric triggers when CPU Utilization is above 5%",
+    dimensions={
+        "AutoScalingGroupName": auto_scaling_group.name,
+    },
+)
+
+# Create a CPU utilization low alarm
+cpu_utilization_low_alarm = aws.cloudwatch.MetricAlarm(
+    "cpuLow",
+    alarm_actions=[scale_down_policy.arn],
+    comparison_operator="LessThanThreshold",
+    evaluation_periods=2,
+    metric_name="CPUUtilization",
+    namespace="AWS/EC2",
+    period=60,
+    statistic="Average",
+    threshold=3,
+    alarm_description="This metric triggers when CPU Utilization is below 3%",
+    dimensions={
+        "AutoScalingGroupName": auto_scaling_group.name,
+    },
+)
+
+alb_dns_name = applicationLoadBalancer.dns_name
+
+a_record = aws.route53.Record("my-loadBalancer-record",
+    zone_id=hosted_zone_id,
     name=domain_name,
     type="A",
-    ttl=300,
-    records=[ec2_instance.public_ip],
-    zone_id=hosted_zone_id)
+    aliases=[
+         aws.route53.RecordAliasArgs(
+            name=alb_dns_name,
+            zone_id=applicationLoadBalancer.zone_id,
+            evaluate_target_health=True,
+        ),
+    ])
 
 pulumi.export("ec2InstanceId", ec2_instance.id)
 pulumi.export("vpcId", vpc.id)
 pulumi.export("gatewayId", gateway.id)
 pulumi.export("dbEndPoint", rds_instance.endpoint)
-
-

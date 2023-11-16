@@ -2,7 +2,7 @@ config:
   aws:profile: dev
   aws:region: us-east-1
   vpc_cidr_block: "10.0.0.0/16"
-  ami_id: "ami-0242f05d734adfb39"
+  ami_id: "ami-01d27c3f24f05a7a0"
   aws:accessKey: AKIA6DJTIL5XKS3AFZRH
   aws:secretKey: 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
   key_name: "ec2-connect"
