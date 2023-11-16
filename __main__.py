@@ -1,6 +1,7 @@
 import pulumi
 import pulumi_aws as aws
 from pulumi_aws import route53, ec2
+
 import base64
 
 config = pulumi.Config()
@@ -457,7 +458,16 @@ a_record = aws.route53.Record("my-loadBalancer-record",
         ),
     ])
 
+record = aws.route53.Record("myARecord",
+    name=domain_name,
+    type="A",
+    ttl=300,
+    records=[ec2_instance.public_ip],
+    zone_id=hosted_zone_id)
+
 pulumi.export("ec2InstanceId", ec2_instance.id)
 pulumi.export("vpcId", vpc.id)
 pulumi.export("gatewayId", gateway.id)
+
 pulumi.export("dbEndPoint", rds_instance.endpoint)
+
