@@ -1,7 +1,10 @@
 import pulumi
+import pulumi_gcp as gcp
 import pulumi_aws as aws
 from pulumi_aws import route53, ec2
 import base64
+import json
+from pulumi_gcp import storage
 
 config = pulumi.Config()
 
@@ -194,11 +197,13 @@ rds_instance = aws.rds.Instance(
     skip_final_snapshot=True,
 )
 
+sns_topic = aws.sns.Topic("submissionTopic")
+
 rds_endpoint = rds_instance.endpoint.apply(lambda endpoint: endpoint)
 
+sns_topic_arn = sns_topic.arn
 
-
-user_data_script = pulumi.Output.all(rds_username, rds_password, rds_endpoint).apply(
+user_data_script = pulumi.Output.all(rds_username, rds_password, rds_endpoint,  sns_topic_arn).apply(
     lambda vars: f"""#!/bin/bash
 cat <<EOF > /home/admin/application.properties
 spring.datasource.driver-class-name=com.mysql.cj.jdbc.Driver
@@ -209,6 +214,8 @@ spring.jpa.show-sql=true
 spring.datasource.username={vars[0]}
 spring.datasource.password={vars[1]}
 spring.datasource.url=jdbc:mysql://{vars[2]}/webapp_DB?createDatabaseIfNotExist=true
+
+sns.topic.arn={vars[3]}
 
 logging.level.org.springframework.web=debug
 logging.file.path=./
@@ -248,12 +255,19 @@ role = aws.iam.Role("cloudwatch-agent",
 }""",
 )
 
+sns_publish_policy_arn = "arn:aws:iam::aws:policy/AmazonSNSFullAccess"  # Or use another relevant policy
+
 # Attach the CloudWatchAgentServerPolicy to the IAM role
 policy_attachment = aws.iam.RolePolicyAttachment("my-policy-attachment",
     policy_arn="arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy",
     role=role.name,
 )
 
+
+sns_policy_attachment = aws.iam.RolePolicyAttachment("snsPolicyAttachment",
+    policy_arn=sns_publish_policy_arn,
+    role=role.name,
+)
 
 
 instance_profile = aws.iam.InstanceProfile("instance_profile", role=role.name)
@@ -263,23 +277,7 @@ hosted_zone_id = config.require("hosted_zoneid")
 domain_name = config.require("hosted_zonename")
 
 
-ec2_instance = ec2.Instance("myEC2Instance",
-    ami=ami_id,
-    instance_type="t2.micro",
-    subnet_id=subnet_id_first,
-    security_groups=[application_security_group.id],  
-    root_block_device={
-        "volume_size": 25,
-        "volume_type": "gp2",  
-        "delete_on_termination": True,  
-    },
-    user_data=user_data_script,
-    key_name=key_pair_name,
-    tags={
-        "Name": "MyEC2Instance",
-    },
-    iam_instance_profile=instance_profile.name,
-    )
+
 
 encoded_user_data =  pulumi.Output.from_input(user_data_script).apply(lambda s: base64.b64encode(s.encode()).decode('utf-8'))
 
@@ -443,6 +441,114 @@ cpu_utilization_low_alarm = aws.cloudwatch.MetricAlarm(
     },
 )
 
+gcpproject_id = config.require("gcpproject_id")
+
+
+bucket = storage.Bucket('my-bucket',
+                        location='US',
+                        project=gcpproject_id,
+                        uniform_bucket_level_access=True)
+
+
+service_account = gcp.serviceaccount.Account('my-service-account',account_id='my-service-account-id', project=gcpproject_id)
+
+service_account_key = gcp.serviceaccount.Key('my-service-account-key',
+    service_account_id=service_account.name  
+)
+
+bucket_iam_binding = gcp.storage.BucketIAMBinding('bucket-iam-binding',
+    bucket=bucket.name,
+    role='roles/storage.objectCreator',
+     members=[service_account.email.apply(lambda email: f'serviceAccount:{email}')]
+)
+
+dynamodb_table = aws.dynamodb.Table("myDynamoDBTable",
+    attributes=[
+        aws.dynamodb.TableAttributeArgs(
+            name="MessageId",
+            type="S",
+        ),
+    ],
+    hash_key="MessageId",
+    billing_mode="PAY_PER_REQUEST",
+)
+
+lambda_role = aws.iam.Role("lambdaRole",
+    assume_role_policy=json.dumps({
+        "Version": "2012-10-17",
+        "Statement": [{
+            "Effect": "Allow",
+            "Principal": {"Service": "lambda.amazonaws.com"},
+            "Action": "sts:AssumeRole"
+        }]
+    })
+)
+
+policy_attachment_log = aws.iam.RolePolicyAttachment("lambdaLogPolicyAttachment",
+    role=lambda_role.name,
+    policy_arn="arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+)
+
+dynamodb_policy = aws.iam.Policy("lambdaDynamoDBPolicy",
+    policy=dynamodb_table.arn.apply(lambda arn: json.dumps({
+        "Version": "2012-10-17",
+        "Statement": [{
+            "Effect": "Allow",
+            "Action": [
+                "dynamodb:GetItem",
+                "dynamodb:PutItem",
+                "dynamodb:UpdateItem",
+                "dynamodb:DeleteItem",
+                "dynamodb:Scan",
+                "dynamodb:Query"
+            ],
+            "Resource": arn
+        }]
+    }))
+)
+
+
+policy_attachment_dynamodb = aws.iam.RolePolicyAttachment("lambdaDynamoDBPolicyAttachment",
+    role=lambda_role.name,
+    policy_arn=dynamodb_policy.arn,
+)
+
+
+mailgun_api = config.require("mailgun_api")
+mailgun_domain = config.require("mailgun_domain")
+
+lambda_function = aws.lambda_.Function("myLambdaFunction",
+    runtime="python3.11",  
+    handler="lambda_function.lambda_handler", 
+    code=pulumi.FileArchive("/Users/swethapaturu/Desktop/cloud_assignments/lambda_project/lambda_function.zip"),
+    environment={
+        "variables": {
+            "DYNAMODB_TABLE_NAME": dynamodb_table.name,
+            "GCP_STORAGE_BUCKET_NAME": bucket.name,
+            "GCP_SERVICE_ACCOUNT_KEY_JSON": service_account_key.private_key,
+            "MAILGUN_API_KEY" : mailgun_api,
+            "MAILGUN_DOMAIN"  : mailgun_domain,
+        }
+    },
+
+    role=lambda_role.arn,
+    timeout=30,
+    memory_size=128
+)
+
+sns_subscription = aws.sns.TopicSubscription("mySnsSubscription",
+    topic=sns_topic.arn,
+    protocol="lambda",
+    endpoint=lambda_function.arn
+)
+
+sns_invoke_permission = aws.lambda_.Permission("snsInvokePermission",
+    action="lambda:InvokeFunction",
+    function=lambda_function.name,
+    principal="sns.amazonaws.com",
+    source_arn=sns_topic.arn
+)
+
 alb_dns_name = applicationLoadBalancer.dns_name
 
 a_record = aws.route53.Record("my-loadBalancer-record",
@@ -457,7 +563,10 @@ a_record = aws.route53.Record("my-loadBalancer-record",
         ),
     ])
 
-pulumi.export("ec2InstanceId", ec2_instance.id)
+
+
+
 pulumi.export("vpcId", vpc.id)
 pulumi.export("gatewayId", gateway.id)
 pulumi.export("dbEndPoint", rds_instance.endpoint)
+pulumi.export("key",service_account_key.private_key)
