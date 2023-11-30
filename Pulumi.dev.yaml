@@ -8,5 +8,7 @@ config:
   db_password: "dbPass23"
   hosted_zoneid: "Z09816301PFSLHWOZJNY1"
   hosted_zonename: "dev.swecsye6225.me"
-
+  gcpproject_id: "development-406405"
+  mailgun_api: "e098a1fa02edf4ddab1e52218646b4bb-30b58138-87c21e02"
+  mailgun_domain: "swecsye6225.me"
     
