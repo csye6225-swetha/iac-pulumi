@@ -362,19 +362,34 @@ applicationLoadBalancer = aws.lb.LoadBalancer(
     
 )
 
-httpListener = aws.lb.Listener(
-    "http-listener",
-    load_balancer_arn= applicationLoadBalancer.arn,
-    port=80, 
-    protocol="HTTP", 
-    default_actions=[  
-        {
-            "type": "forward",  # Forward the request to a target group
-            "target_group_arn": targetGroup.arn,  # ARN of the target group to forward traffic to
-        }
-    ]
-)
+# httpListener = aws.lb.Listener(
+#     "http-listener",
+#     load_balancer_arn= applicationLoadBalancer.arn,
+#     port=80, 
+#     protocol="HTTP", 
+#     default_actions=[  
+#         {
+#             "type": "forward",  # Forward the request to a target group
+#             "target_group_arn": targetGroup.arn,  # ARN of the target group to forward traffic to
+#         }
+#     ]
+# )
 
+
+
+certificatearn = config.require("certificate-arn")
+
+httpsListener = aws.lb.Listener(
+    "https-listener",
+    load_balancer_arn=applicationLoadBalancer.arn,
+    port=443,
+    protocol="HTTPS",
+    certificate_arn=certificatearn,
+    default_actions=[{
+        "type": "forward",
+        "target_group_arn": targetGroup.arn,
+    }]
+)
 
 
 auto_scaling_group = aws.autoscaling.Group(
