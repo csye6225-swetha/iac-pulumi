@@ -13,4 +13,5 @@ config:
   gcpproject_id: "development-406405"
   mailgun_api: "e098a1fa02edf4ddab1e52218646b4bb-30b58138-87c21e02"
   mailgun_domain: "swecsye6225.me"
+  certificate-arn: 
     
