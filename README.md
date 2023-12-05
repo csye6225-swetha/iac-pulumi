@@ -64,7 +64,11 @@ To deploy this infrastructure, follow these steps:
 
 6. Pulumi will provision the AWS resources as specified in the code.
 
-Command Used to import Namecheap SSL certificate to ACM:  aws acm import-certificate --certificate fileb://filepath/demo_swecsye6225_me.crt --private-key fileb://filepath/demo.swecsye6225.me.key --certificate-chain fileb://filepath/demo_swecsye6225_me.ca-bundle --profile demo
+Command Used to import Namecheap SSL certificate to ACM: 
+
+aws acm import-certificate --certificate fileb://filepath/demo_swecsye6225_me.crt --private-key fileb://filepath/demo.swecsye6225.me.key --certificate-chain fileb://filepath/demo_swecsye6225_me.ca-bundle --profile demo
+
+
 
 ## Cleanup
 
