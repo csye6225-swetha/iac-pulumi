@@ -1,17 +1,17 @@
 config:
   aws:profile: demo
   aws:region: us-east-1
-  aws:accessKey: AKIAS3IZXJMO3LCYCFG2
-  aws:secretKey: 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
+  aws:accessKey: 
+  aws:secretKey: 
   vpc_cidr_block: "172.16.0.0/16"
   ami_id: "ami-0da7cc489f3a12143"
   key_name: "demo-connect"
-  db_username: "csye6225"
-  db_password: "dbPass23"
+  db_username: ""
+  db_password: ""
   hosted_zoneid: "Z05394592NYKYQL3E809G"
   hosted_zonename: "demo.swecsye6225.me"
   gcpproject_id: "demo406405"
-  mailgun_api: "e098a1fa02edf4ddab1e52218646b4bb-30b58138-87c21e02"
+  mailgun_api: ""
   mailgun_domain: "swecsye6225.me"
   certificate-arn: arn:aws:acm:us-east-1:196011838237:certificate/945dbd49-23b8-48e3-b578-954f65a22b43
 
