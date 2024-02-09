@@ -3,15 +3,15 @@ config:
   aws:region: us-east-1
   vpc_cidr_block: "10.0.0.0/16"
   ami_id: "ami-0607e1fd9625b5051"
-  aws:accessKey: AKIA6DJTIL5XKS3AFZRH
-  aws:secretKey: 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
+  aws:accessKey: 
+  aws:secretKey:
   key_name: "ec2-connect"
   db_username: "csye6225"
   db_password: "dbPass23"
   hosted_zoneid: "Z09816301PFSLHWOZJNY1"
   hosted_zonename: "dev.swecsye6225.me"
   gcpproject_id: "development-406405"
-  mailgun_api: "e098a1fa02edf4ddab1e52218646b4bb-30b58138-87c21e02"
+  mailgun_api: ""
   mailgun_domain: "swecsye6225.me"
   certificate-arn: 
     
